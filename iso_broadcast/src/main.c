@@ -9,7 +9,7 @@
 #include <zephyr/sys/byteorder.h>
 
 /* Dit was eerst 10 ms, maar dan werkte de code niet */
-#define BUF_ALLOC_TIMEOUT (100) /* 10 ms */
+#define BUF_ALLOC_TIMEOUT (50) /* 10 ms */
 #define BIG_TERMINATE_TIMEOUT_US (60 * USEC_PER_SEC) /* 60 s */
 #define BIG_SDU_INTERVAL_US (10000) /* 10 ms */
 
@@ -48,7 +48,7 @@ static void iso_disconnected(struct bt_iso_chan *chan, uint8_t reason)
 
 static void iso_sent(struct bt_iso_chan *chan)
 {
-	printk("ISO Channel %p send data\n", chan);
+	// printk("ISO Channel %p send data\n", chan);
 	k_sem_give(&sem_iso_data);
 }
 

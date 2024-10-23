@@ -15,11 +15,13 @@
 #define TIMEOUT_SYNC_CREATE K_SECONDS(10)
 #define NAME_LEN            30
 
+/* Actieve scan en kan scan-responses sturen */
 #define BT_LE_SCAN_CUSTOM BT_LE_SCAN_PARAM(BT_LE_SCAN_TYPE_ACTIVE, \
 					   BT_LE_SCAN_OPT_NONE, \
 					   BT_GAP_SCAN_FAST_INTERVAL, \
-					   BT_GAP_SCAN_FAST_WINDOW)
+					   BT_GAP_SCAN_FAST_WINDOW) /* duur van de scan */
 
+/* periodiek advertentie (PA) */
 #define PA_RETRY_COUNT 6
 
 #define BIS_ISO_CHAN_COUNT 2
@@ -42,6 +44,7 @@ static K_SEM_DEFINE(sem_big_sync_lost, 0, BIS_ISO_CHAN_COUNT);
 /* The devicetree node identifier for the "led0" alias. */
 #define LED0_NODE DT_ALIAS(led0)
 
+/* Voorkomt dat de code wordt gecompileerd op borden waar geen led0-alias beschikbaar is in de Devicetree */
 #if DT_NODE_HAS_STATUS(LED0_NODE, okay)
 static const struct gpio_dt_spec led_gpio = GPIO_DT_SPEC_GET(LED0_NODE, gpios);
 #define HAS_LED     1
@@ -51,6 +54,7 @@ static struct k_work_delayable blink_work;
 static bool                    led_is_on;
 static bool                    blink;
 
+/* is bedoeld om de LED aan en uit te schakelen op gezette tijdsintervallen. Het maakt gebruik van een werkqueue om de LED continu te laten knipperen, zolang een bepaalde voorwaarde waar is */
 static void blink_timeout(struct k_work *work)
 {
 	if (!blink) {
@@ -59,11 +63,12 @@ static void blink_timeout(struct k_work *work)
 
 	led_is_on = !led_is_on;
 	gpio_pin_set_dt(&led_gpio, (int)led_is_on);
-
+	/* plant een nieuwe uitvoering van de functie blink_timeout na een bepaalde vertragingstijd */
 	k_work_schedule(&blink_work, BLINK_ONOFF);
 }
 #endif
 
+/* Callback functie die naam uit de advertising bluetooth data haalt */
 static bool data_cb(struct bt_data *data, void *user_data)
 {
 	char *name = user_data;
@@ -74,6 +79,7 @@ static bool data_cb(struct bt_data *data, void *user_data)
 	case BT_DATA_NAME_COMPLETE:
 		len = MIN(data->data_len, NAME_LEN - 1);
 		memcpy(name, data->data, len);
+		/* null-terminator toegevoegd om een geldige C-string te maken. */
 		name[len] = '\0';
 		return false;
 	default:
@@ -81,6 +87,7 @@ static bool data_cb(struct bt_data *data, void *user_data)
 	}
 }
 
+/* Vertaald de PHY-snelheid (snelheid waarmee gegevens over de fysieke laag van de radio worden verzonden) naar een string die niet gewijzigd kan worden */
 static const char *phy2str(uint8_t phy)
 {
 	switch (phy) {
@@ -92,6 +99,7 @@ static const char *phy2str(uint8_t phy)
 	}
 }
 
+/* verwerkt gegevens die worden ontvangen tijdens een BLE scan. Deze functie ontvangt een advertentiepakket van een apparaat en drukt verschillende eigenschappen daarvan af */
 static void scan_recv(const struct bt_le_scan_recv_info *info,
 		      struct net_buf_simple *buf)
 {
@@ -103,6 +111,7 @@ static void scan_recv(const struct bt_le_scan_recv_info *info,
 	bt_data_parse(buf, data_cb, name);
 
 	bt_addr_le_to_str(info->addr, le_addr, sizeof(le_addr));
+	/* BT_GAP_ADV_TYPE_ADV_IND = 0x00 , BT_GAP_ADV_TYPE_ADV_DIRECT_IND = 0x01 , BT_GAP_ADV_TYPE_ADV_SCAN_IND = 0x02 , BT_GAP_ADV_TYPE_ADV_NONCONN_IND = 0x03 , BT_GAP_ADV_TYPE_SCAN_RSP = 0x04 , BT_GAP_ADV_TYPE_EXT_ADV = 0x05 */
 	printk("[DEVICE]: %s, AD evt type %u, Tx Pwr: %i, RSSI %i %s "
 	       "C:%u S:%u D:%u SR:%u E:%u Prim: %s, Secn: %s, "
 	       "Interval: 0x%04x (%u us), SID: %u\n",
@@ -130,6 +139,7 @@ static struct bt_le_scan_cb scan_callbacks = {
 	.recv = scan_recv,
 };
 
+/* callback-functie die wordt aangeroepen wanneer een BLE periodieke advertentie-synchronisatie succesvol tot stand is gebracht. */
 static void sync_cb(struct bt_le_per_adv_sync *sync,
 		    struct bt_le_per_adv_sync_synced_info *info)
 {
@@ -145,6 +155,7 @@ static void sync_cb(struct bt_le_per_adv_sync *sync,
 	k_sem_give(&sem_per_sync);
 }
 
+/* callback die wordt aangeroepen wanneer een periodieke advertentie-synchronisatie is beëindigd */
 static void term_cb(struct bt_le_per_adv_sync *sync,
 		    const struct bt_le_per_adv_sync_term_info *info)
 {
@@ -159,6 +170,7 @@ static void term_cb(struct bt_le_per_adv_sync *sync,
 	k_sem_give(&sem_per_sync_lost);
 }
 
+/* callback die wordt aangeroepen wanneer gegevens worden ontvangen van een gesynchroniseerde periodieke BLE-advertentie => This callback notifies the application about changes to the sync state */
 static void recv_cb(struct bt_le_per_adv_sync *sync,
 		    const struct bt_le_per_adv_sync_recv_info *info,
 		    struct net_buf_simple *buf)
@@ -175,6 +187,7 @@ static void recv_cb(struct bt_le_per_adv_sync *sync,
 	       info->rssi, info->cte_type, buf->len, data_str);
 }
 
+/* callback die wordt aangeroepen wanneer er informatie ontvangen wordt over een BIG (Broadcast Isochronous Group) in een BLE Isochronous Channel */
 static void biginfo_cb(struct bt_le_per_adv_sync *sync,
 		       const struct bt_iso_biginfo *biginfo)
 {
@@ -188,7 +201,9 @@ static void biginfo_cb(struct bt_le_per_adv_sync *sync,
 	       "sdu_interval %u us, max_sdu %u, phy %s, "
 	       "%s framing, %sencrypted\n",
 	       bt_le_per_adv_sync_get_index(sync), le_addr, biginfo->sid,
-	       biginfo->num_bis, biginfo->sub_evt_count,
+		   /* aantal BIS (Broadcast Isochronous Streams), wat het aantal isochrone datastromen in de BIG aangeeft.*/
+	       biginfo->num_bis, 
+		   biginfo->sub_evt_count,
 	       biginfo->iso_interval,
 	       (biginfo->iso_interval * 5 / 4),
 	       biginfo->burst_number, biginfo->offset,
@@ -208,14 +223,15 @@ static struct bt_le_per_adv_sync_cb sync_callbacks = {
 	.biginfo = biginfo_cb,
 };
 
-static void iso_recv(struct bt_iso_chan *chan, const struct bt_iso_recv_info *info,
-		struct net_buf *buf)
+/* callback die wordt aangeroepen wanneer er ISO (Isochronous) data wordt ontvangen via een ISO-channel in BLE */
+static void iso_recv(struct bt_iso_chan *chan, const struct bt_iso_recv_info *info, struct net_buf *buf)
 {
 	char data_str[128];
 	size_t str_len;
 	uint32_t count = 0; /* only valid if the data is a counter */
 
 	if (buf->len == sizeof(count)) {
+		/* little-endian systeem worden de least significant bytes (LSB) van een getal als eerste opgeslagen. host-endian => dewelke die door het systeem gebruikt wordt */
 		count = sys_get_le32(buf->data);
 		if (IS_ENABLED(CONFIG_ISO_ALIGN_PRINT_INTERVALS)) {
 			iso_recv_count = count;
@@ -240,8 +256,7 @@ static void iso_connected(struct bt_iso_chan *chan)
 
 static void iso_disconnected(struct bt_iso_chan *chan, uint8_t reason)
 {
-	printk("ISO Channel %p disconnected with reason 0x%02x\n",
-	       chan, reason);
+	printk("ISO Channel %p disconnected with reason 0x%02x\n", chan, reason);
 
 	if (reason != BT_HCI_ERR_OP_CANCELLED_BY_HOST) {
 		k_sem_give(&sem_big_sync_lost);
@@ -277,10 +292,11 @@ static struct bt_iso_big_sync_param big_sync_param = {
 	.bis_channels = bis,
 	.num_bis = BIS_ISO_CHAN_COUNT,
 	.bis_bitfield = (BIT_MASK(BIS_ISO_CHAN_COUNT) << 1),
-	.mse = BT_ISO_SYNC_MSE_ANY, /* any number of subevents */
+	.mse = BT_ISO_SYNC_MSE_ANY, /* any number of subevents, controller chooses*/
 	.sync_timeout = 100, /* in 10 ms units */
 };
 
+/* Zorgt ervoor dat alle semoforen unavailable zijn */
 static void reset_semaphores(void)
 {
 	k_sem_reset(&sem_per_adv);
@@ -319,6 +335,7 @@ int main(void)
 	}
 	printk("done.\n");
 
+	/* koppel delayable work structure to function, slechts 1 keer uit te voeren */
 	k_work_init_delayable(&blink_work, blink_timeout);
 #endif /* HAS_LED */
 
@@ -354,11 +371,13 @@ int main(void)
 		led_is_on = false;
 		blink = true;
 		gpio_pin_set_dt(&led_gpio, (int)led_is_on);
+		/* voert werkitem 1 keeer uit na opgegeven vertraging */
 		k_work_reschedule(&blink_work, BLINK_ONOFF);
 #endif /* HAS_LED */
 
 		printk("Waiting for periodic advertising...\n");
 		per_adv_found = false;
+		/* zal oneindig lang wachten tot callback scan_recv opgeroepen wordt en deze de sem_per_adv semafoor vrijgeeft*/
 		err = k_sem_take(&sem_per_adv, K_FOREVER);
 		if (err) {
 			printk("failed (err %d)\n", err);
@@ -375,6 +394,7 @@ int main(void)
 		printk("success.\n");
 
 		printk("Creating Periodic Advertising Sync...");
+		/* kopieer adress van BLE broadcaster naar lokale variabele in main */
 		bt_addr_le_copy(&sync_create_param.addr, &per_addr);
 		sync_create_param.options = 0;
 		sync_create_param.sid = per_sid;
@@ -471,6 +491,7 @@ big_sync_create:
 
 		for (uint8_t chan = 0U; chan < BIS_ISO_CHAN_COUNT; chan++) {
 			printk("Waiting for BIG sync lost chan %u...\n", chan);
+			/* Zolang de synchronistaie niet verloren gaat zal er hier gewacht worden en zal bij elke iso_recv data naar de console geprint worden */
 			err = k_sem_take(&sem_big_sync_lost, K_FOREVER);
 			if (err) {
 				printk("failed (err %d)\n", err);
