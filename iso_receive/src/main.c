@@ -5,8 +5,6 @@
  */
 
 #include <zephyr/device.h>
-#include <zephyr/devicetree.h>
-#include <zephyr/drivers/gpio.h>
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/iso.h>
@@ -41,32 +39,6 @@ static K_SEM_DEFINE(sem_per_big_info, 0, 1);
 static K_SEM_DEFINE(sem_big_sync, 0, BIS_ISO_CHAN_COUNT);
 static K_SEM_DEFINE(sem_big_sync_lost, 0, BIS_ISO_CHAN_COUNT);
 
-/* The devicetree node identifier for the "led0" alias. */
-#define LED0_NODE DT_ALIAS(led0)
-
-/* Voorkomt dat de code wordt gecompileerd op borden waar geen led0-alias beschikbaar is in de Devicetree */
-#if DT_NODE_HAS_STATUS(LED0_NODE, okay)
-static const struct gpio_dt_spec led_gpio = GPIO_DT_SPEC_GET(LED0_NODE, gpios);
-#define HAS_LED     1
-#define BLINK_ONOFF K_MSEC(500)
-
-static struct k_work_delayable blink_work;
-static bool                    led_is_on;
-static bool                    blink;
-
-/* is bedoeld om de LED aan en uit te schakelen op gezette tijdsintervallen. Het maakt gebruik van een werkqueue om de LED continu te laten knipperen, zolang een bepaalde voorwaarde waar is */
-static void blink_timeout(struct k_work *work)
-{
-	if (!blink) {
-		return;
-	}
-
-	led_is_on = !led_is_on;
-	gpio_pin_set_dt(&led_gpio, (int)led_is_on);
-	/* plant een nieuwe uitvoering van de functie blink_timeout na een bepaalde vertragingstijd */
-	k_work_schedule(&blink_work, BLINK_ONOFF);
-}
-#endif
 
 /* Callback functie die naam uit de advertising bluetooth data haalt */
 static bool data_cb(struct bt_data *data, void *user_data)
@@ -319,26 +291,6 @@ int main(void)
 
 	printk("Starting Synchronized Receiver Demo\n");
 
-#if defined(HAS_LED)
-	printk("Get reference to LED device...");
-
-	if (!gpio_is_ready_dt(&led_gpio)) {
-		printk("LED gpio device not ready.\n");
-		return 0;
-	}
-	printk("done.\n");
-
-	printk("Configure GPIO pin...");
-	err = gpio_pin_configure_dt(&led_gpio, GPIO_OUTPUT_ACTIVE);
-	if (err) {
-		return 0;
-	}
-	printk("done.\n");
-
-	/* koppel delayable work structure to function, slechts 1 keer uit te voeren */
-	k_work_init_delayable(&blink_work, blink_timeout);
-#endif /* HAS_LED */
-
 	/* Initialize the Bluetooth Subsystem */
 	err = bt_enable(NULL);
 	if (err) {
@@ -365,15 +317,6 @@ int main(void)
 			return 0;
 		}
 		printk("success.\n");
-
-#if defined(HAS_LED)
-		printk("Start blinking LED...\n");
-		led_is_on = false;
-		blink = true;
-		gpio_pin_set_dt(&led_gpio, (int)led_is_on);
-		/* voert werkitem 1 keeer uit na opgegeven vertraging */
-		k_work_reschedule(&blink_work, BLINK_ONOFF);
-#endif /* HAS_LED */
 
 		printk("Waiting for periodic advertising...\n");
 		per_adv_found = false;
@@ -475,19 +418,6 @@ big_sync_create:
 			goto per_sync_lost_check;
 		}
 		printk("BIG sync established.\n");
-
-#if defined(HAS_LED)
-		printk("Stop blinking LED.\n");
-		blink = false;
-		/* If this fails, we'll exit early in the handler because blink
-		 * is false.
-		 */
-		k_work_cancel_delayable(&blink_work);
-
-		/* Keep LED on */
-		led_is_on = true;
-		gpio_pin_set_dt(&led_gpio, (int)led_is_on);
-#endif /* HAS_LED */
 
 		for (uint8_t chan = 0U; chan < BIS_ISO_CHAN_COUNT; chan++) {
 			printk("Waiting for BIG sync lost chan %u...\n", chan);
